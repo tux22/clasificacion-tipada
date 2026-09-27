@@ -1,0 +1,5 @@
+data/
+logs-jev-*/
+__pycache__/
+*.pyc
+.venv/
