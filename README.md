@@ -145,6 +145,7 @@ python3 scripts/eval_gli.py --device cpu
 
 ## Enlaces
 
+- Post con la primera comparación, Laya contra LLM locales: https://lnkd.in/p/gunhvGJs
 - Jev: https://docs.typesafe.ai/introduction
 - Laya: https://huggingface.co/convaiinnovations/laya
 - llama.cpp: https://github.com/ggml-org/llama.cpp
