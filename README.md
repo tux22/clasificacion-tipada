@@ -35,6 +35,12 @@ corrieron en una RTX 3060 Ti de 8 GB.
 Todas las corridas, con precisión, recall, Brier, ECE y velocidad, están en
 [`resultados.csv`](./resultados.csv).
 
+> **Nota sobre Laya en Banking77 (2026-09-30).** Estas cifras son con la configuración de fábrica
+> de `laya 0.3.4`, que reparte 192 tokens entre todas las opciones y, si no caben, recorta cada
+> una a 3 tokens. En Banking77-77 pasa siempre; en Banking77-40, en 3 de las 5 semillas. Con
+> `--head-max-len 512` (lo que recomienda el README de Laya), sin describir las categorías:
+> **Banking77-40 0.6060 ± 0.0398** y **Banking77-77 0.4433**. Jev sigue arriba en las dos.
+
 **Lectura corta:** con pocas clases bien distintas, Laya gana y corre en local. Con muchas clases
 casi sinónimas, Jev gana por mucho y sigue calibrado. Entre los modelos locales, calibrar con 200
 ejemplos mueve más que cambiar de modelo.
@@ -45,6 +51,9 @@ ejemplos mueve más que cambiar de modelo.
   la calibración del final, sin solaparse. Semillas de validación: `42,7,123,2024,555`.
 - **Mismas instrucciones para Jev y Laya**, con las categorías sin describir (solo el nombre).
   Es la comparación pareja, no el mejor resultado posible de ninguno.
+- **Jev no es determinista.** La misma llamada repetida da 0.97 o 0.98, y la misma corrida de 500
+  dio 0.8720 y 0.8760 en días distintos. Para medir un cambio contra Jev hay que correr la base
+  el mismo día y con varias semillas; no comparar contra números viejos.
 - **Calibración:** Platt scaling, `p = sigmoid(a·z + b)` sobre el logit, ajustado con 200
   ejemplos etiquetados que no están en el test.
 - **Métricas:** AUROC (¿separa las clases?), F1, accuracy, macro-F1, top-3, Brier y ECE con 10
@@ -78,12 +87,16 @@ bloqueo temporal de la cuenta y de la IP. Se ajusta con `JEV_PAUSA` y `DESCANSO`
 
 ### Laya
 
+Los resultados son con **`laya==0.3.4`**; versiones posteriores cambiaron las temperaturas.
+
 ```bash
-pip install laya
+pip install laya==0.3.4
 python3 scripts/eval_laya.py --device cuda                              # spam
 python3 scripts/eval_multi.py --engine laya --dataset agnews --n 500 --seeds 42,7,123,2024,555
 python3 scripts/eval_multi.py --engine laya --dataset banking77 --max-classes 40 --n 500 --seeds 42,7,123,2024,555
 python3 scripts/eval_multi.py --engine laya --dataset banking77 --n 300
+# con muchas clases, darle espacio a las opciones para que no se recorten:
+python3 scripts/eval_multi.py --engine laya --dataset banking77 --n 300 --head-max-len 512 --max-len 1024
 ```
 
 ### LLM locales con llama.cpp
@@ -120,6 +133,32 @@ pip install gliclass       # requiere Python 3.10+
 python3 scripts/eval_gli.py --device cpu
 ```
 
+## Prueba 2: describir las categorías
+
+La documentación de Jev recomienda describir cada opción de `choice`. Mismo split, semillas y
+métricas que arriba, con una línea de descripción por categoría
+([`descripciones/`](./descripciones/)), escrita solo a partir del nombre, sin mirar el test.
+El efecto se mide contra una base sin describir **corrida el mismo día**.
+
+| Tarea | Jev sin describir | Jev descrito | Laya sin describir | Laya descrito |
+|---|---|---|---|---|
+| AG News, 4 clases | 0.8720 / 0.8760 *(s42)* | 0.8708 ± 0.0093 | 0.9268 ± 0.0061 | 0.9136 ± 0.0155 |
+| Banking77, 40 clases | 0.8612 ± 0.0397 | **0.8756 ± 0.0339** | 0.6060 ± 0.0398 | **0.1672 ± 0.0325** |
+| Banking77, 77 clases *(1 × 300)* | 0.8033 | 0.8300 | 0.4433 | 0.2733 |
+
+Laya en Banking77 con `--head-max-len 512 --max-len 1024`; con descripciones sus opciones aún se
+recortan (11 tokens de texto por opción en 40 clases, 5 en 77). En AG News caben completas con
+la configuración de fábrica.
+
+- **Jev:** sin cambio en noticias; en 40 clases sube en 3 semillas y queda igual en 2. Duplica
+  los tokens de entrada por llamada.
+- **Laya:** baja en noticias (−1.3, y su ECE pasa de 0.022 a 0.199) y se desploma con 40 clases.
+
+```bash
+./scripts/run_descripciones.sh jev                              # requiere TYPESAFE_API_KEY
+PY=python3 DEVICE=cuda HML=512 ./scripts/run_descripciones.sh laya
+```
+
 ## Scripts
 
 | Script | Para qué |
@@ -131,11 +170,14 @@ python3 scripts/eval_gli.py --device cpu
 | `eval_gli.py` | GLiClass |
 | `jev_client.py` | Cliente de la API de Jev con la interfaz de Laya, solo librería estándar |
 | `run_jev.sh` | Set completo de Jev, reanudable |
+| `run_descripciones.sh` | Prueba 2: con y sin descripciones (`--criteria`), con control y base del día |
 
 ## Límites
 
 - Tres datasets, zero-shot. No generaliza a clasificación de texto en general.
-- Categorías sin describir para Jev y Laya. La documentación de Jev recomienda describirlas.
+- Comparación principal con categorías sin describir. Describirlas se midió aparte (Prueba 2).
+- Multiclase sin calibrar para los dos modelos. El README de Laya recomienda ajustar una
+  temperatura por tarea; las cifras de ECE de Laya son de fábrica.
 - Un SVM entrenado sobre el dataset de spam saca 0.976 de accuracy: les gana a todos los modelos
   locales. Si hay datos etiquetados y la tarea es estable, un clasificador clásico sigue siendo
   lo más barato.
@@ -146,6 +188,7 @@ python3 scripts/eval_gli.py --device cpu
 ## Enlaces
 
 - Post con la primera comparación, Laya contra LLM locales: https://lnkd.in/p/gunhvGJs
+- Post con la comparación Jev contra Laya: https://lnkd.in/p/gyeS-jrk
 - Jev: https://docs.typesafe.ai/introduction
 - Laya: https://huggingface.co/convaiinnovations/laya
 - llama.cpp: https://github.com/ggml-org/llama.cpp

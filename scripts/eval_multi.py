@@ -27,6 +27,12 @@ ap.add_argument("--template", default="qwen3-nothink")
 ap.add_argument("--label", default="")
 ap.add_argument("--max-classes", type=int, default=0,
                 help="quedarse con las N clases mas frecuentes (0 = todas)")
+ap.add_argument("--criteria", default="",
+                help="JSON {etiqueta: descripcion} para choice (Laya/Jev); vacio = sin describir (null)")
+ap.add_argument("--head-max-len", type=int, default=0,
+                help="solo laya: presupuesto de tokens para instruccion+opciones (0 = el del checkpoint, 192)")
+ap.add_argument("--max-len", type=int, default=0,
+                help="solo laya: largo maximo de la secuencia (0 = el del checkpoint, 512)")
 ap.add_argument("--seeds", default="42",
                 help="semillas separadas por coma; se reporta media +- desviacion")
 A = ap.parse_args()
@@ -132,6 +138,7 @@ def qwen_probs(text, labels, retries=2):
 
 
 _agent = None
+DESC = json.load(open(A.criteria, encoding="utf-8")) if A.criteria else {}
 
 
 def laya_probs(text, labels):
@@ -144,9 +151,15 @@ def laya_probs(text, labels):
         else:
             import laya
             _agent = laya.Agent(device=A.device)
+            # laya 0.3.4 lee ambos de self.cfg en cada llamada; con muchas opciones el default
+            # (192) recorta cada una a max(4, 176 // k) tokens (laya/common.py, build_sequence)
+            if A.head_max_len:
+                _agent.cfg["head_max_len"] = A.head_max_len
+            if A.max_len:
+                _agent.cfg["max_len"] = A.max_len
     q = {"cls": {"type": "choice",
                  "instructions": "Classify the text into exactly one category.",
-                 "criteria": {l: None for l in labels}}}
+                 "criteria": {l: DESC.get(l) for l in labels}}}
     try:
         r = _agent.system_one(text[:1500], q)
     except Exception as e:
@@ -204,6 +217,10 @@ def run_once():
         rows = [(remap[y], t) for y, t in rows if y in remap][:A.n]
     else:
         rows = rows[:A.n]
+    if DESC:
+        faltan = [l for l in labels if not DESC.get(l)]
+        if faltan:
+            sys.exit("--criteria sin descripcion para: %s" % faltan)
     if A.engine == "qwen" and len(labels) > len(LETTERS):
         print("  NOTA: %d clases > %d letras -> se numeran 1..N; el primer token solo da el"
               " digito inicial, asi que la resolucion es limitada (ver informe)."
@@ -250,8 +267,9 @@ def mean_sd(vals):
 
 
 seeds = [int(x) for x in A.seeds.split(",") if x.strip()]
-print("\n### %s | %s | n=%d | semillas: %s"
-      % (A.label or A.engine, A.dataset, A.n, seeds))
+print("\n### %s | %s | n=%d | semillas: %s | criteria: %s | head_max_len=%s max_len=%s"
+      % (A.label or A.engine, A.dataset, A.n, seeds, A.criteria or "null",
+         A.head_max_len or "default", A.max_len or "default"))
 res = []
 for sd in seeds:
     SEED = sd
